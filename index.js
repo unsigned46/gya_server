@@ -81,10 +81,15 @@ let isSendingReminder = false;
 
 function telegramGet(pathname) {
   return new Promise((resolve, reject) => {
-    const url = `https://api.telegram.org/bot${TOKEN}/${pathname}`;
-
-    https
-      .get(url, (res) => {
+    const request = https.request(
+      {
+        hostname: 'api.telegram.org',
+        path: `/bot${TOKEN}/${pathname}`,
+        method: 'GET',
+        family: 4,
+        timeout: 15000,
+      },
+      (res) => {
         let data = '';
 
         res.on('data', (chunk) => {
@@ -105,8 +110,15 @@ function telegramGet(pathname) {
             reject(error);
           }
         });
-      })
-      .on('error', reject);
+      }
+    );
+
+    request.on('timeout', () => {
+      request.destroy(new Error('Telegram request timed out after 15000ms'));
+    });
+
+    request.on('error', reject);
+    request.end();
   });
 }
 
