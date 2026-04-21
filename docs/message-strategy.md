@@ -28,8 +28,19 @@
 ## Current Defaults
 
 ```env
+MESSAGE_PERSONA=butler
 PHASE_ONE_INTERVAL_MINUTES=2
 ESCALATION_AFTER_MINUTES=6
 GIVE_UP_AFTER_MINUTES=15
 PHASE_TWO_INTERVAL_SECONDS=180
 ```
+
+## Personas
+
+Message tone is selected with `MESSAGE_PERSONA` in `.env`.
+
+| Persona | Tone |
+| --- | --- |
+| `butler` | 기본 집사 톤. 정중하고 차분하게 첫 행동을 유도한다. |
+| `gigachad` | 강한 실행 압박 톤. 짧고 직선적으로 움직이게 한다. |
+| `yandere` | 집착형 응원 톤. 기다림과 관심의 컨셉을 살리되 위협 없이 작성한다. |

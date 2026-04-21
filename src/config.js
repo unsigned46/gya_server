@@ -21,6 +21,7 @@ const DEFAULTS = {
   maxWeeklyPasses: 5,
   defaultSnoozeMinutes: 5,
   maxSnoozeMinutes: 60,
+  messagePersona: 'butler',
 };
 
 function loadEnvFile(envFile = path.join(__dirname, '..', '.env'), env = process.env) {
@@ -82,7 +83,12 @@ function buildConfig({
     DEFAULTS.startMinute,
     env
   );
-  const messages = buildMessages({ startHour, startMinute });
+  const messagePersona = env.MESSAGE_PERSONA || DEFAULTS.messagePersona;
+  const messages = buildMessages({
+    persona: messagePersona,
+    startHour,
+    startMinute,
+  });
 
   return {
     token: env.TELEGRAM_BOT_TOKEN,
@@ -90,6 +96,7 @@ function buildConfig({
     timeZone: KST_TIME_ZONE,
     pollIntervalMs: DEFAULTS.pollIntervalMs,
     schedulerIntervalMs: DEFAULTS.schedulerIntervalMs,
+    messagePersona,
     startHour,
     startMinute,
     phaseOneIntervalMs:

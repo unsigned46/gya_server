@@ -20,7 +20,14 @@ Personal Telegram work-start reminder bot.
 
 1. Copy `.env.example` to `.env`.
 2. Fill in `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
-3. Adjust the timing values if needed.
+3. Choose `MESSAGE_PERSONA`.
+4. Adjust the timing values if needed.
+
+Available message personas:
+
+- `butler`: 기본 집사 톤
+- `gigachad`: 강한 실행 압박 톤
+- `yandere`: 집착형 응원 톤
 
 ```powershell
 npm.cmd test
