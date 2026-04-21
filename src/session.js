@@ -13,16 +13,9 @@ function getElapsedMs(session, nowMs = Date.now()) {
   return Math.max(0, nowMs - session.startedAtMs);
 }
 
-function getRandomInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function getNextReminderDelay(elapsedMs, config, randomInt = getRandomInt) {
+function getNextReminderDelay(elapsedMs, config) {
   if (elapsedMs >= config.escalationAfterMs) {
-    return randomInt(
-      config.emergencyMinIntervalMs,
-      config.emergencyMaxIntervalMs
-    );
+    return config.phaseTwoIntervalMs;
   }
 
   return config.phaseOneIntervalMs;
@@ -30,10 +23,14 @@ function getNextReminderDelay(elapsedMs, config, randomInt = getRandomInt) {
 
 function getReminderText(elapsedMs, reminderCount, config) {
   if (elapsedMs >= config.escalationAfterMs) {
-    return config.phaseTwoMessages[reminderCount % config.phaseTwoMessages.length];
+    return config.messages.phaseTwoReminders[
+      reminderCount % config.messages.phaseTwoReminders.length
+    ];
   }
 
-  return config.phaseOneMessages[reminderCount % config.phaseOneMessages.length];
+  return config.messages.phaseOneReminders[
+    reminderCount % config.messages.phaseOneReminders.length
+  ];
 }
 
 function createWaitingSession(parts, nowMs = Date.now()) {
@@ -65,7 +62,6 @@ function createSessionService({
   now = () => Date.now(),
   readKstParts = getKstParts,
   readWeekKey = getWeekKey,
-  randomInt = getRandomInt,
 }) {
   let isSendingReminder = false;
 
@@ -130,7 +126,7 @@ function createSessionService({
       state.session.lastReminderAtMs = currentMs;
       state.session.reminderCount = (state.session.reminderCount || 0) + 1;
       state.session.nextReminderAtMs =
-        currentMs + getNextReminderDelay(elapsedMs, config, randomInt);
+        currentMs + getNextReminderDelay(elapsedMs, config);
       saveState(state);
     } catch (error) {
       console.error('sendReminder error:', error);
@@ -150,7 +146,7 @@ function createSessionService({
     state.session.nextReminderAtMs = null;
     saveState(state);
 
-    await sendMessage(config.disappointmentMessage);
+    await sendMessage(config.messages.stopForNoStart);
   }
 
   async function acknowledgeStart() {
@@ -167,36 +163,56 @@ function createSessionService({
     state.session.stoppedAtMs = null;
     state.session.nextReminderAtMs = null;
     saveState(state);
-    await sendMessage('[OK] 좋다. 이제 작업 모드다. 집중해서 밀어붙여라.');
+    await sendMessage(config.messages.acknowledgement);
   }
 
   function getStatusMessage() {
     ensureCurrentWeeklyPassState();
 
     if (!state.session) {
-      return `[STATUS] 오늘 세션은 아직 열리지 않았다. 이번 주 pass ${state.weeklyPass.used}/${config.maxWeeklyPasses}`;
+      return config.messages.statusNoSession({
+        used: state.weeklyPass.used,
+        max: config.maxWeeklyPasses,
+      });
     }
 
     if (state.session.acknowledgedAtMs) {
-      return `[OK] ${state.session.dateKey} 세션은 이미 시작됐다. 이번 주 pass ${state.weeklyPass.used}/${config.maxWeeklyPasses}`;
+      return config.messages.statusWorking({
+        dateKey: state.session.dateKey,
+        used: state.weeklyPass.used,
+        max: config.maxWeeklyPasses,
+      });
     }
 
     if (state.session.mode === 'passed') {
-      return `[PASS] ${state.session.dateKey} 오늘은 전략적 pass다. 이번 주 pass ${state.weeklyPass.used}/${config.maxWeeklyPasses}`;
+      return config.messages.statusPassed({
+        dateKey: state.session.dateKey,
+        used: state.weeklyPass.used,
+        max: config.maxWeeklyPasses,
+      });
     }
 
     if (state.session.mode === 'stopped') {
-      return `[STOP] ${state.session.dateKey} 오늘 세션은 종료됐다. 이번 주 pass ${state.weeklyPass.used}/${config.maxWeeklyPasses}`;
+      return config.messages.statusStopped({
+        dateKey: state.session.dateKey,
+        used: state.weeklyPass.used,
+        max: config.maxWeeklyPasses,
+      });
     }
 
     const elapsedSeconds = Math.floor(getElapsedMs(state.session, now()) / 1000);
-    return `[WAIT] ${state.session.dateKey} 아직 시작 전이다. ${elapsedSeconds}초 지났다. 이번 주 pass ${state.weeklyPass.used}/${config.maxWeeklyPasses}`;
+    return config.messages.statusWaiting({
+      dateKey: state.session.dateKey,
+      elapsedSeconds,
+      used: state.weeklyPass.used,
+      max: config.maxWeeklyPasses,
+    });
   }
 
   async function resetSession() {
     state.session = null;
     saveState(state);
-    await sendMessage('[RESET] 오늘 세션 상태를 초기화했다. 다시 제대로 시작하면 된다.');
+    await sendMessage(config.messages.reset);
   }
 
   async function usePass() {
@@ -204,7 +220,10 @@ function createSessionService({
 
     if (state.weeklyPass.used >= config.maxWeeklyPasses) {
       await sendMessage(
-        `[PASS] 이번 주 pass는 전부 소진됐다. ${state.weeklyPass.used}/${config.maxWeeklyPasses}`
+        config.messages.passLimitReached({
+          used: state.weeklyPass.used,
+          max: config.maxWeeklyPasses,
+        })
       );
       return;
     }
@@ -212,7 +231,7 @@ function createSessionService({
     const parts = currentParts();
 
     if (!isAfterStartTime(parts, config)) {
-      await sendMessage('[PASS] pass는 세션이 열린 뒤에만 쓸 수 있다.');
+      await sendMessage(config.messages.passBeforeStart);
       return;
     }
 
@@ -221,13 +240,16 @@ function createSessionService({
     }
 
     if (state.session.mode === 'working') {
-      await sendMessage('[PASS] 이미 시작한 세션이다. 이제는 pass가 아니라 전진이다.');
+      await sendMessage(config.messages.passAlreadyWorking);
       return;
     }
 
     if (state.session.mode === 'passed') {
       await sendMessage(
-        `[PASS] 오늘은 이미 pass 처리됐다. 이번 주 pass ${state.weeklyPass.used}/${config.maxWeeklyPasses}`
+        config.messages.passAlreadyUsed({
+          used: state.weeklyPass.used,
+          max: config.maxWeeklyPasses,
+        })
       );
       return;
     }
@@ -240,9 +262,15 @@ function createSessionService({
     saveState(state);
 
     const message =
-      config.passMessages[(state.weeklyPass.used - 1) % config.passMessages.length];
+      config.messages.passMessages[
+        (state.weeklyPass.used - 1) % config.messages.passMessages.length
+      ];
     await sendMessage(
-      `[PASS] ${message} 이번 주 pass ${state.weeklyPass.used}/${config.maxWeeklyPasses}`
+      config.messages.passUsed({
+        message,
+        used: state.weeklyPass.used,
+        max: config.maxWeeklyPasses,
+      })
     );
   }
 

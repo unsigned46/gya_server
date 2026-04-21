@@ -1,4 +1,4 @@
-function createCommandHandler({ session, sendMessage }) {
+function createCommandHandler({ session, sendMessage, messages }) {
   return async function handleCommand(text) {
     if (text === '/forcestart') {
       await session.forceStartSession();
@@ -26,9 +26,7 @@ function createCommandHandler({ session, sendMessage }) {
     }
 
     if (text === '/help') {
-      await sendMessage(
-        '명령어: /startwork, /forcestart, /pass, /status, /reset'
-      );
+      await sendMessage(messages.help);
     }
   };
 }

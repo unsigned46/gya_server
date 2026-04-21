@@ -11,11 +11,10 @@ function createTestConfig(overrides = {}) {
       env: {
         START_HOUR: '20',
         START_MINUTE: '0',
-        PHASE_ONE_INTERVAL_MINUTES: '1',
-        ESCALATION_AFTER_MINUTES: '5',
-        GIVE_UP_AFTER_MINUTES: '10',
-        EMERGENCY_MIN_INTERVAL_SECONDS: '1',
-        EMERGENCY_MAX_INTERVAL_SECONDS: '10',
+        PHASE_ONE_INTERVAL_MINUTES: '2',
+        ESCALATION_AFTER_MINUTES: '6',
+        GIVE_UP_AFTER_MINUTES: '15',
+        PHASE_TWO_INTERVAL_SECONDS: '180',
         MAX_WEEKLY_PASSES: '5',
       },
       shouldLoadEnvFile: false,
@@ -53,7 +52,6 @@ function createHarness({
     now: () => currentNowMs,
     readKstParts: () => currentParts,
     readWeekKey: () => '2026-04-20',
-    randomInt: (min) => min,
   });
 
   return {
@@ -79,10 +77,7 @@ test('/startwork moves an empty session into working mode', async () => {
   assert.equal(harness.state.session.mode, 'working');
   assert.equal(harness.state.session.acknowledgedAtMs, 1000);
   assert.equal(harness.state.session.nextReminderAtMs, null);
-  assert.equal(
-    harness.messages.at(-1),
-    '[OK] 좋다. 이제 작업 모드다. 집중해서 밀어붙여라.'
-  );
+  assert.equal(harness.messages.at(-1), harness.config.messages.acknowledgement);
 });
 
 test('scheduler opens the daily session after the configured start time', async () => {
@@ -93,7 +88,7 @@ test('scheduler opens the daily session after the configured start time', async 
   assert.equal(harness.state.session.mode, 'waiting');
   assert.equal(harness.state.session.dateKey, '2026-04-21');
   assert.equal(harness.state.session.reminderCount, 1);
-  assert.equal(harness.messages[0], harness.config.phaseOneMessages[0]);
+  assert.equal(harness.messages[0], harness.config.messages.phaseOneReminders[0]);
 });
 
 test('reminders escalate to phase two after the escalation window', async () => {
@@ -108,10 +103,10 @@ test('reminders escalate to phase two after the escalation window', async () => 
 
   await harness.session.sendReminder(false);
 
-  assert.equal(harness.messages[0], config.phaseTwoMessages[0]);
+  assert.equal(harness.messages[0], config.messages.phaseTwoReminders[0]);
   assert.equal(
     harness.state.session.nextReminderAtMs,
-    config.escalationAfterMs + config.emergencyMinIntervalMs
+    config.escalationAfterMs + config.phaseTwoIntervalMs
   );
 });
 
@@ -129,7 +124,7 @@ test('waiting sessions stop after the give-up window', async () => {
 
   assert.equal(harness.state.session.mode, 'stopped');
   assert.equal(harness.state.session.stopReason, 'missed');
-  assert.equal(harness.messages[0], config.disappointmentMessage);
+  assert.equal(harness.messages[0], config.messages.stopForNoStart);
 });
 
 test('weekly pass usage is counted and capped', async () => {
@@ -141,6 +136,16 @@ test('weekly pass usage is counted and capped', async () => {
 
   assert.equal(harness.state.weeklyPass.used, 1);
   assert.equal(harness.state.session.mode, 'passed');
-  assert.match(harness.messages[0], /이번 주 pass 1\/1/);
-  assert.equal(harness.messages[1], '[PASS] 이번 주 pass는 전부 소진됐다. 1/1');
+  assert.equal(
+    harness.messages[0],
+    config.messages.passUsed({
+      message: config.messages.passMessages[0],
+      used: 1,
+      max: 1,
+    })
+  );
+  assert.equal(
+    harness.messages[1],
+    config.messages.passLimitReached({ used: 1, max: 1 })
+  );
 });

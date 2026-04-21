@@ -29,6 +29,7 @@ const session = createSessionService({
 const handleCommand = createCommandHandler({
   session,
   sendMessage: telegram.sendMessage,
+  messages: config.messages,
 });
 
 let isPolling = false;

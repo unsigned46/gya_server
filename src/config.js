@@ -1,6 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 
+const {
+  buildMessages,
+  buildPhaseOneMessages,
+  formatStartTimeLabel,
+} = require('./messages');
+
 const KST_TIME_ZONE = 'Asia/Seoul';
 
 const DEFAULTS = {
@@ -8,30 +14,12 @@ const DEFAULTS = {
   schedulerIntervalMs: 1000,
   startHour: 20,
   startMinute: 0,
-  phaseOneIntervalMinutes: 1,
-  escalationAfterMinutes: 5,
-  giveUpAfterMinutes: 10,
-  emergencyMinIntervalSeconds: 1,
-  emergencyMaxIntervalSeconds: 10,
+  phaseOneIntervalMinutes: 2,
+  escalationAfterMinutes: 6,
+  giveUpAfterMinutes: 15,
+  phaseTwoIntervalSeconds: 180,
   maxWeeklyPasses: 5,
 };
-
-const PHASE_TWO_MESSAGES = [
-  '[PUSH] 지연 중이다. /startwork',
-  '[PUSH] 아직 시작하지 않았다. /startwork',
-  '[PUSH] 예정 시각은 지났다. /startwork',
-  '[PUSH] 확인 말고 시작. /startwork',
-  '[PUSH] 계속 미루는 중이다. /startwork',
-  '[PUSH] 지금 착수. /startwork',
-];
-
-const PASS_MESSAGES = [
-  '오늘은 pass 처리한다. 내일 다시 시작한다.',
-  '오늘 세션은 건너뛴다. 다음 세션에 바로 들어간다.',
-];
-
-const DISAPPOINTMENT_MESSAGE =
-  '[STOP] 10분이 지났고 시작도 없었다. 실망스럽다. 오늘 세션은 종료한다.';
 
 function loadEnvFile(envFile = path.join(__dirname, '..', '.env'), env = process.env) {
   if (!fs.existsSync(envFile)) {
@@ -77,24 +65,6 @@ function parseEnvNumber(key, fallbackValue, env = process.env) {
   return parsedValue;
 }
 
-function formatStartTimeLabel(hour, minute) {
-  const period = hour < 12 ? '오전' : '오후';
-  const normalizedHour = hour % 12 || 12;
-  const minuteText =
-    minute === 0 ? '' : ` ${String(minute).padStart(2, '0')}분`;
-
-  return `${period} ${normalizedHour}시${minuteText}`;
-}
-
-function buildPhaseOneMessages(startTimeLabel) {
-  return [
-    `[WORK] ${startTimeLabel}이다. 시작 시간이다. /startwork`,
-    `[WORK] ${startTimeLabel}인데 아직 시작 전이다. /startwork`,
-    `[WORK] ${startTimeLabel}다. 바로 착수해라. /startwork`,
-    `[WORK] ${startTimeLabel}다. 지체하지 마라. /startwork`,
-  ];
-}
-
 function buildConfig({
   env = process.env,
   envFile = path.join(__dirname, '..', '.env'),
@@ -110,7 +80,7 @@ function buildConfig({
     DEFAULTS.startMinute,
     env
   );
-  const startTimeLabel = formatStartTimeLabel(startHour, startMinute);
+  const messages = buildMessages({ startHour, startMinute });
 
   return {
     token: env.TELEGRAM_BOT_TOKEN,
@@ -144,16 +114,10 @@ function buildConfig({
       ) *
       60 *
       1000,
-    emergencyMinIntervalMs:
+    phaseTwoIntervalMs:
       parseEnvNumber(
-        'EMERGENCY_MIN_INTERVAL_SECONDS',
-        DEFAULTS.emergencyMinIntervalSeconds,
-        env
-      ) * 1000,
-    emergencyMaxIntervalMs:
-      parseEnvNumber(
-        'EMERGENCY_MAX_INTERVAL_SECONDS',
-        DEFAULTS.emergencyMaxIntervalSeconds,
+        'PHASE_TWO_INTERVAL_SECONDS',
+        DEFAULTS.phaseTwoIntervalSeconds,
         env
       ) * 1000,
     maxWeeklyPasses: parseEnvNumber(
@@ -161,10 +125,11 @@ function buildConfig({
       DEFAULTS.maxWeeklyPasses,
       env
     ),
-    phaseOneMessages: buildPhaseOneMessages(startTimeLabel),
-    phaseTwoMessages: PHASE_TWO_MESSAGES,
-    passMessages: PASS_MESSAGES,
-    disappointmentMessage: DISAPPOINTMENT_MESSAGE,
+    messages,
+    phaseOneMessages: messages.phaseOneReminders,
+    phaseTwoMessages: messages.phaseTwoReminders,
+    passMessages: messages.passMessages,
+    disappointmentMessage: messages.stopForNoStart,
   };
 }
 
