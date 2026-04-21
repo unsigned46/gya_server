@@ -36,6 +36,7 @@ function createHarness({
   },
 } = {}) {
   const messages = [];
+  const events = [];
   const saves = [];
   let currentNowMs = nowMs;
   let currentParts = parts;
@@ -45,6 +46,9 @@ function createHarness({
     config,
     saveState: (nextState) => {
       saves.push(JSON.parse(JSON.stringify(nextState)));
+    },
+    recordEvent: (event) => {
+      events.push(event);
     },
     sendMessage: async (message) => {
       messages.push(message);
@@ -56,6 +60,7 @@ function createHarness({
 
   return {
     config,
+    events,
     messages,
     saves,
     session,
@@ -78,6 +83,12 @@ test('/startwork moves an empty session into working mode', async () => {
   assert.equal(harness.state.session.acknowledgedAtMs, 1000);
   assert.equal(harness.state.session.nextReminderAtMs, null);
   assert.equal(harness.messages.at(-1), harness.config.messages.acknowledgement);
+  assert.deepEqual(
+    harness.events.map((event) => event.type),
+    ['session_opened', 'session_started']
+  );
+  assert.equal(harness.events[1].metadata.elapsedMs, 0);
+  assert.equal(harness.events[1].metadata.implicitSession, true);
 });
 
 test('scheduler opens the daily session after the configured start time', async () => {
@@ -89,6 +100,13 @@ test('scheduler opens the daily session after the configured start time', async 
   assert.equal(harness.state.session.dateKey, '2026-04-21');
   assert.equal(harness.state.session.reminderCount, 1);
   assert.equal(harness.messages[0], harness.config.messages.phaseOneReminders[0]);
+  assert.deepEqual(
+    harness.events.map((event) => event.type),
+    ['session_opened', 'reminder_sent']
+  );
+  assert.equal(harness.events[0].metadata.trigger, 'schedule');
+  assert.equal(harness.events[1].metadata.phase, 'phase_one');
+  assert.equal(harness.events[1].metadata.reminderCount, 1);
 });
 
 test('reminders escalate to phase two after the escalation window', async () => {
@@ -108,6 +126,9 @@ test('reminders escalate to phase two after the escalation window', async () => 
     harness.state.session.nextReminderAtMs,
     config.escalationAfterMs + config.phaseTwoIntervalMs
   );
+  assert.equal(harness.events[0].type, 'reminder_sent');
+  assert.equal(harness.events[0].metadata.phase, 'phase_two');
+  assert.equal(harness.events[0].metadata.elapsedMs, config.escalationAfterMs);
 });
 
 test('waiting sessions stop after the give-up window', async () => {
@@ -125,6 +146,9 @@ test('waiting sessions stop after the give-up window', async () => {
   assert.equal(harness.state.session.mode, 'stopped');
   assert.equal(harness.state.session.stopReason, 'missed');
   assert.equal(harness.messages[0], config.messages.stopForNoStart);
+  assert.equal(harness.events[0].type, 'session_stopped');
+  assert.equal(harness.events[0].metadata.reason, 'missed');
+  assert.equal(harness.events[0].metadata.elapsedMs, config.giveUpAfterMs);
 });
 
 test('weekly pass usage is counted and capped', async () => {
@@ -148,4 +172,39 @@ test('weekly pass usage is counted and capped', async () => {
     harness.messages[1],
     config.messages.passLimitReached({ used: 1, max: 1 })
   );
+  assert.deepEqual(
+    harness.events.map((event) => event.type),
+    ['session_opened', 'session_passed']
+  );
+  assert.equal(harness.events[0].metadata.trigger, 'pass');
+  assert.equal(harness.events[1].metadata.weeklyPassUsed, 1);
+});
+
+test('/snooze defers the next reminder for a waiting session', async () => {
+  const state = createDefaultState();
+  state.session = createWaitingSession({ dateKey: '2026-04-21' }, 0);
+  const harness = createHarness({ state, nowMs: 10_000 });
+
+  await harness.session.snoozeReminder(5);
+
+  assert.equal(harness.state.session.nextReminderAtMs, 310_000);
+  assert.equal(harness.events[0].type, 'session_snoozed');
+  assert.equal(harness.events[0].metadata.minutes, 5);
+  assert.equal(harness.events[0].metadata.elapsedMs, 10_000);
+});
+
+test('/done completes a working session and records work duration', async () => {
+  const state = createDefaultState();
+  state.session = createWaitingSession({ dateKey: '2026-04-21' }, 0);
+  state.session.mode = 'working';
+  state.session.acknowledgedAtMs = 60_000;
+  const harness = createHarness({ state, nowMs: 660_000 });
+
+  await harness.session.completeSession();
+
+  assert.equal(harness.state.session.mode, 'done');
+  assert.equal(harness.state.session.completedAtMs, 660_000);
+  assert.equal(harness.events[0].type, 'session_done');
+  assert.equal(harness.events[0].metadata.elapsedMs, 660_000);
+  assert.equal(harness.events[0].metadata.workElapsedMs, 600_000);
 });

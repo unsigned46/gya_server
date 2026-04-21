@@ -2,11 +2,14 @@ const path = require('path');
 
 const { buildConfig, validateConfig } = require('./src/config');
 const { createCommandHandler } = require('./src/commands');
+const { createHistoryStore } = require('./src/historyStore');
+const { createReviewService } = require('./src/review');
 const { createSessionService } = require('./src/session');
 const { createStateStore } = require('./src/stateStore');
 const { createTelegramClient } = require('./src/telegram');
 const { getKstParts } = require('./src/time');
 
+const HISTORY_FILE = path.join(__dirname, 'history.json');
 const STATE_FILE = path.join(__dirname, 'state.json');
 
 const config = buildConfig({
@@ -14,6 +17,11 @@ const config = buildConfig({
 });
 validateConfig(config);
 
+const historyStore = createHistoryStore(HISTORY_FILE);
+const review = createReviewService({
+  historyStore,
+  timeZone: config.timeZone,
+});
 const stateStore = createStateStore(STATE_FILE);
 const state = stateStore.load();
 const telegram = createTelegramClient({
@@ -23,13 +31,25 @@ const telegram = createTelegramClient({
 const session = createSessionService({
   state,
   config,
+  recordEvent: historyStore.append,
   saveState: stateStore.save,
   sendMessage: telegram.sendMessage,
 });
 const handleCommand = createCommandHandler({
+  config,
+  getWeeklyReviewMessage: review.getWeeklyReviewMessage,
   session,
   sendMessage: telegram.sendMessage,
   messages: config.messages,
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('unhandledRejection:', error);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('uncaughtException:', error);
+  process.exitCode = 1;
 });
 
 let isPolling = false;

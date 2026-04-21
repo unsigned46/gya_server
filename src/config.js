@@ -19,6 +19,8 @@ const DEFAULTS = {
   giveUpAfterMinutes: 15,
   phaseTwoIntervalSeconds: 180,
   maxWeeklyPasses: 5,
+  defaultSnoozeMinutes: 5,
+  maxSnoozeMinutes: 60,
 };
 
 function loadEnvFile(envFile = path.join(__dirname, '..', '.env'), env = process.env) {
@@ -123,6 +125,16 @@ function buildConfig({
     maxWeeklyPasses: parseEnvNumber(
       'MAX_WEEKLY_PASSES',
       DEFAULTS.maxWeeklyPasses,
+      env
+    ),
+    defaultSnoozeMinutes: parseEnvNumber(
+      'DEFAULT_SNOOZE_MINUTES',
+      DEFAULTS.defaultSnoozeMinutes,
+      env
+    ),
+    maxSnoozeMinutes: parseEnvNumber(
+      'MAX_SNOOZE_MINUTES',
+      DEFAULTS.maxSnoozeMinutes,
       env
     ),
     messages,

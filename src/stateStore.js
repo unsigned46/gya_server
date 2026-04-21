@@ -1,5 +1,7 @@
 const fs = require('fs');
 
+const { writeJsonFileAtomic } = require('./jsonFile');
+
 function createDefaultState() {
   return {
     lastUpdateId: 0,
@@ -31,7 +33,7 @@ function loadState(stateFile) {
 }
 
 function saveState(stateFile, currentState) {
-  fs.writeFileSync(stateFile, JSON.stringify(currentState, null, 2), 'utf-8');
+  writeJsonFileAtomic(stateFile, currentState);
 }
 
 function createStateStore(stateFile) {

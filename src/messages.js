@@ -38,9 +38,28 @@ function buildMessages({ startHour, startMinute }) {
     passMessages: PASS_MESSAGES,
     acknowledgement:
       '[OK] 시작 확인. 이제 목표는 오래 버티기가 아니라 10분만 흐름 만들기다.',
+    done:
+      '[DONE] 오늘 작업 완료로 기록했다. 시작보다 더 어려운 마무리까지 했다.',
     reset:
       '[RESET] 오늘 세션 상태를 초기화했다. 다시 시작 신호를 기다리거나 /forcestart로 열 수 있다.',
-    help: '명령어: /startwork, /forcestart, /pass, /status, /reset',
+    help: [
+      '[HELP] 사용 가능한 명령어',
+      '/startwork - 오늘 작업 시작 확인',
+      '/status - 현재 세션 상태 확인',
+      '/snooze 5 - 5분 뒤 다시 알림',
+      '/done - 오늘 작업 완료 기록',
+      '/pass - 오늘 세션을 의식적으로 건너뜀',
+      '/week - 이번 주 회고 보기',
+      '/forcestart - 지금 세션 강제 시작',
+      '/reset - 현재 세션 상태 초기화',
+      '/help - 명령어 목록 보기',
+    ].join('\n'),
+    snoozeNoWaitingSession:
+      '[SNOOZE] 미룰 수 있는 대기 세션이 없다. 필요하면 /forcestart로 열 수 있다.',
+    snoozeMinutesInvalid:
+      '[SNOOZE] 사용법: /snooze 5 처럼 분 단위 숫자를 붙여줘.',
+    snoozed: ({ minutes }) =>
+      `[SNOOZE] 알림을 ${minutes}분 뒤로 미뤘다. 다시 돌아올 때는 첫 행동 하나만 하면 된다.`,
     stopForNoStart:
       '[STOP] 15분 동안 시작 확인이 없어 오늘 세션을 닫는다. 내일은 첫 행동을 더 작게 잡자.',
     statusNoSession: ({ used, max }) =>
@@ -51,6 +70,8 @@ function buildMessages({ startHour, startMinute }) {
       `[PASS] ${dateKey} 오늘은 의식적 pass다. 이번 주 pass ${used}/${max}`,
     statusStopped: ({ dateKey, used, max }) =>
       `[STOP] ${dateKey} 오늘 세션은 닫혔다. 이번 주 pass ${used}/${max}`,
+    statusDone: ({ dateKey, used, max }) =>
+      `[DONE] ${dateKey} 오늘 작업은 완료됐다. 이번 주 pass ${used}/${max}`,
     statusWaiting: ({ dateKey, elapsedSeconds, used, max }) =>
       `[WAIT] ${dateKey} 아직 시작 전이다. ${elapsedSeconds}초 지났다. 이번 주 pass ${used}/${max}`,
     passLimitReached: ({ used, max }) =>
@@ -62,6 +83,12 @@ function buildMessages({ startHour, startMinute }) {
       `[PASS] 오늘은 이미 pass 처리됐다. 이번 주 pass ${used}/${max}`,
     passUsed: ({ message, used, max }) =>
       `[PASS] ${message} 이번 주 pass ${used}/${max}`,
+    doneNoSession:
+      '[DONE] 완료할 세션이 아직 없다. 먼저 /forcestart 또는 /startwork로 세션을 열자.',
+    doneBeforeStart:
+      '[DONE] 아직 시작 확인이 없다. 완료 전에 /startwork로 시작을 먼저 기록하자.',
+    doneAlready:
+      '[DONE] 오늘 작업은 이미 완료로 기록되어 있다.',
   };
 }
 

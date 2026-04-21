@@ -41,6 +41,7 @@ function createWaitingSession(parts, nowMs = Date.now()) {
     lastReminderAtMs: 0,
     nextReminderAtMs: 0,
     reminderCount: 0,
+    completedAtMs: null,
     stoppedAtMs: null,
     stopReason: null,
     mode: 'waiting',
@@ -58,12 +59,14 @@ function createSessionService({
   state,
   config,
   saveState = () => {},
+  recordEvent = () => {},
   sendMessage,
   now = () => Date.now(),
   readKstParts = getKstParts,
   readWeekKey = getWeekKey,
 }) {
   let isSendingReminder = false;
+  let eventSequence = 0;
 
   function currentDate() {
     return new Date(now());
@@ -81,17 +84,38 @@ function createSessionService({
     ensureWeeklyPassState(state, currentWeekKey());
   }
 
+  function recordSessionEvent(type, metadata = {}, parts = currentParts()) {
+    const occurredAtMs = now();
+
+    try {
+      recordEvent({
+        id: `${occurredAtMs}-${eventSequence++}-${type}`,
+        type,
+        occurredAtMs,
+        occurredAtIso: new Date(occurredAtMs).toISOString(),
+        dateKey: parts.dateKey,
+        sessionDateKey: state.session ? state.session.dateKey : parts.dateKey,
+        metadata,
+      });
+    } catch (error) {
+      console.error('recordEvent error:', error.message);
+    }
+  }
+
   async function startDailySession(parts) {
     ensureCurrentWeeklyPassState();
     state.session = createWaitingSession(parts, now());
 
     saveState(state);
+    recordSessionEvent('session_opened', { trigger: 'schedule' }, parts);
     await sendReminder(true);
   }
 
   async function forceStartSession() {
-    state.session = createWaitingSession(currentParts(), now());
+    const parts = currentParts();
+    state.session = createWaitingSession(parts, now());
     saveState(state);
+    recordSessionEvent('session_opened', { trigger: 'force' }, parts);
     await sendReminder(true);
   }
 
@@ -120,14 +144,24 @@ function createSessionService({
     isSendingReminder = true;
 
     try {
-      await sendMessage(
-        getReminderText(elapsedMs, state.session.reminderCount || 0, config)
-      );
+      const reminderIndex = state.session.reminderCount || 0;
+      const text = getReminderText(elapsedMs, reminderIndex, config);
+      const nextReminderDelayMs = getNextReminderDelay(elapsedMs, config);
+      const phase =
+        elapsedMs >= config.escalationAfterMs ? 'phase_two' : 'phase_one';
+
+      await sendMessage(text);
       state.session.lastReminderAtMs = currentMs;
-      state.session.reminderCount = (state.session.reminderCount || 0) + 1;
-      state.session.nextReminderAtMs =
-        currentMs + getNextReminderDelay(elapsedMs, config);
+      state.session.reminderCount = reminderIndex + 1;
+      state.session.nextReminderAtMs = currentMs + nextReminderDelayMs;
       saveState(state);
+      recordSessionEvent('reminder_sent', {
+        elapsedMs,
+        message: text,
+        nextReminderDelayMs,
+        phase,
+        reminderCount: state.session.reminderCount,
+      });
     } catch (error) {
       console.error('sendReminder error:', error);
     } finally {
@@ -140,29 +174,59 @@ function createSessionService({
       return;
     }
 
+    const currentMs = now();
+    const elapsedMs = getElapsedMs(state.session, currentMs);
+
     state.session.mode = 'stopped';
-    state.session.stoppedAtMs = now();
+    state.session.completedAtMs = null;
+    state.session.stoppedAtMs = currentMs;
     state.session.stopReason = 'missed';
     state.session.nextReminderAtMs = null;
     saveState(state);
+    recordSessionEvent('session_stopped', {
+      elapsedMs,
+      reason: 'missed',
+      reminderCount: state.session.reminderCount || 0,
+    });
 
     await sendMessage(config.messages.stopForNoStart);
   }
 
   async function acknowledgeStart() {
     const currentMs = now();
+    const hadSession = Boolean(state.session);
+    let openedParts = null;
 
     if (!state.session) {
-      state.session = createWaitingSession(currentParts(), currentMs);
+      openedParts = currentParts();
+      state.session = createWaitingSession(openedParts, currentMs);
       state.session.lastReminderAtMs = currentMs;
     }
 
+    const elapsedMs = getElapsedMs(state.session, currentMs);
+    const reminderCount = state.session.reminderCount || 0;
+
     state.session.acknowledgedAtMs = currentMs;
     state.session.mode = 'working';
+    state.session.completedAtMs = null;
     state.session.stopReason = null;
     state.session.stoppedAtMs = null;
     state.session.nextReminderAtMs = null;
     saveState(state);
+
+    if (!hadSession) {
+      recordSessionEvent(
+        'session_opened',
+        { trigger: 'acknowledge' },
+        openedParts
+      );
+    }
+
+    recordSessionEvent('session_started', {
+      elapsedMs,
+      implicitSession: !hadSession,
+      reminderCount,
+    });
     await sendMessage(config.messages.acknowledgement);
   }
 
@@ -171,6 +235,14 @@ function createSessionService({
 
     if (!state.session) {
       return config.messages.statusNoSession({
+        used: state.weeklyPass.used,
+        max: config.maxWeeklyPasses,
+      });
+    }
+
+    if (state.session.mode === 'done') {
+      return config.messages.statusDone({
+        dateKey: state.session.dateKey,
         used: state.weeklyPass.used,
         max: config.maxWeeklyPasses,
       });
@@ -209,9 +281,67 @@ function createSessionService({
     });
   }
 
+  async function snoozeReminder(minutes) {
+    if (!state.session || state.session.mode !== 'waiting') {
+      await sendMessage(config.messages.snoozeNoWaitingSession);
+      return;
+    }
+
+    const currentMs = now();
+    const delayMs = minutes * 60 * 1000;
+
+    state.session.nextReminderAtMs = currentMs + delayMs;
+    saveState(state);
+    recordSessionEvent('session_snoozed', {
+      delayMs,
+      elapsedMs: getElapsedMs(state.session, currentMs),
+      minutes,
+      reminderCount: state.session.reminderCount || 0,
+    });
+    await sendMessage(config.messages.snoozed({ minutes }));
+  }
+
+  async function completeSession() {
+    if (!state.session) {
+      await sendMessage(config.messages.doneNoSession);
+      return;
+    }
+
+    if (state.session.mode === 'done') {
+      await sendMessage(config.messages.doneAlready);
+      return;
+    }
+
+    if (state.session.mode !== 'working' || !state.session.acknowledgedAtMs) {
+      await sendMessage(config.messages.doneBeforeStart);
+      return;
+    }
+
+    const currentMs = now();
+
+    state.session.mode = 'done';
+    state.session.completedAtMs = currentMs;
+    state.session.nextReminderAtMs = null;
+    saveState(state);
+    recordSessionEvent('session_done', {
+      elapsedMs: getElapsedMs(state.session, currentMs),
+      workElapsedMs: currentMs - state.session.acknowledgedAtMs,
+      reminderCount: state.session.reminderCount || 0,
+    });
+    await sendMessage(config.messages.done);
+  }
+
   async function resetSession() {
+    const previousSession = state.session
+      ? {
+          dateKey: state.session.dateKey,
+          mode: state.session.mode,
+        }
+      : null;
+
     state.session = null;
     saveState(state);
+    recordSessionEvent('session_reset', { previousSession });
     await sendMessage(config.messages.reset);
   }
 
@@ -235,7 +365,9 @@ function createSessionService({
       return;
     }
 
-    if (!state.session || state.session.dateKey !== parts.dateKey) {
+    const openedForPass = !state.session || state.session.dateKey !== parts.dateKey;
+
+    if (openedForPass) {
       state.session = createWaitingSession(parts, now());
     }
 
@@ -254,12 +386,27 @@ function createSessionService({
       return;
     }
 
+    const currentMs = now();
+    const elapsedMs = getElapsedMs(state.session, currentMs);
+
     state.weeklyPass.used += 1;
     state.session.mode = 'passed';
-    state.session.stoppedAtMs = now();
+    state.session.completedAtMs = null;
+    state.session.stoppedAtMs = currentMs;
     state.session.stopReason = 'pass';
     state.session.nextReminderAtMs = null;
     saveState(state);
+
+    if (openedForPass) {
+      recordSessionEvent('session_opened', { trigger: 'pass' }, parts);
+    }
+
+    recordSessionEvent('session_passed', {
+      elapsedMs,
+      reminderCount: state.session.reminderCount || 0,
+      weeklyPassUsed: state.weeklyPass.used,
+      weeklyPassMax: config.maxWeeklyPasses,
+    });
 
     const message =
       config.messages.passMessages[
@@ -302,6 +449,8 @@ function createSessionService({
     getStatusMessage,
     resetSession,
     sendReminder,
+    completeSession,
+    snoozeReminder,
     startDailySession,
     stopSessionForNoStart,
     tickScheduler,

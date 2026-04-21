@@ -1,31 +1,89 @@
-function createCommandHandler({ session, sendMessage, messages }) {
+function parseCommand(text) {
+  const [rawCommand = '', ...args] = text.trim().split(/\s+/);
+  const command = rawCommand.split('@')[0].toLowerCase();
+
+  return {
+    args,
+    command,
+  };
+}
+
+function parseMinutes(value, fallbackValue, maxValue) {
+  if (value === undefined || value === '') {
+    return fallbackValue;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > maxValue) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function createCommandHandler({
+  config,
+  getWeeklyReviewMessage,
+  messages,
+  sendMessage,
+  session,
+}) {
   return async function handleCommand(text) {
-    if (text === '/forcestart') {
+    const { args, command } = parseCommand(text);
+
+    if (command === '/forcestart') {
       await session.forceStartSession();
       return;
     }
 
-    if (text === '/startwork' || text === '/ack' || text === '/start') {
+    if (command === '/startwork' || command === '/ack' || command === '/start') {
       await session.acknowledgeStart();
       return;
     }
 
-    if (text === '/status') {
+    if (command === '/status') {
       await sendMessage(session.getStatusMessage());
       return;
     }
 
-    if (text === '/reset') {
+    if (command === '/reset') {
       await session.resetSession();
       return;
     }
 
-    if (text === '/pass') {
+    if (command === '/pass') {
       await session.usePass();
       return;
     }
 
-    if (text === '/help') {
+    if (command === '/snooze') {
+      const minutes = parseMinutes(
+        args[0],
+        config.defaultSnoozeMinutes,
+        config.maxSnoozeMinutes
+      );
+
+      if (minutes === null) {
+        await sendMessage(messages.snoozeMinutesInvalid);
+        return;
+      }
+
+      await session.snoozeReminder(minutes);
+      return;
+    }
+
+    if (command === '/done' || command === '/complete') {
+      await session.completeSession();
+      return;
+    }
+
+    if (command === '/week') {
+      await sendMessage(getWeeklyReviewMessage());
+      return;
+    }
+
+    if (command === '/help') {
       await sendMessage(messages.help);
     }
   };
@@ -33,4 +91,6 @@ function createCommandHandler({ session, sendMessage, messages }) {
 
 module.exports = {
   createCommandHandler,
+  parseCommand,
+  parseMinutes,
 };
